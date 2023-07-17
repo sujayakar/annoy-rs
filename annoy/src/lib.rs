@@ -11,6 +11,10 @@ use std::{
 // - builder pattern
 // - change header to use const ptrs where appropraite
 // - get_n_trees
+// - more rusty APIs than -1 isize
+//
+// glove-100-angular:
+// num_trees: 100-400, search_k: 100,000
 
 use annoy_sys::*;
 
@@ -127,6 +131,7 @@ impl AnnoyAngular {
         &mut self,
         item: u32,
         n: usize,
+        search_k: i32,
     ) -> anyhow::Result<(Vec<u32>, Vec<f32>)> {
         // TODO: bounds checking?
         unsafe {
@@ -136,7 +141,7 @@ impl AnnoyAngular {
                 self.ptr,
                 item,
                 n,
-                -1, // search_k configurable?
+                search_k,
                 results.as_mut_ptr(),
                 distances.as_mut_ptr(),
             );
@@ -151,6 +156,7 @@ impl AnnoyAngular {
         &mut self,
         vector: &[f32],
         n: usize,
+        search_k: i32,
     ) -> anyhow::Result<(Vec<u32>, Vec<f32>)> {
         anyhow::ensure!(vector.len() == self.dimension);
         unsafe {
@@ -160,7 +166,7 @@ impl AnnoyAngular {
                 self.ptr,
                 vector.as_ptr() as *mut _,
                 n,
-                -1,
+                search_k,
                 results.as_mut_ptr(),
                 distances.as_mut_ptr(),
             );
@@ -237,12 +243,12 @@ mod tests {
         a.add_item(2, &[0.0, 0.0, 1.0])?;
         a.build(-1)?;
 
-        let (results, distance) = a.get_nearest_by_item(0, 100)?;
+        let (results, distance) = a.get_nearest_by_item(0, 100, -1)?;
         for (r, d) in results.iter().zip(distance.iter()) {
             println!("{} {}", r, d);
         }
 
-        let (results, distance) = a.get_nearest_by_vector(&[1.0, 0.5, 0.5], 100)?;
+        let (results, distance) = a.get_nearest_by_vector(&[1.0, 0.5, 0.5], 100, -1)?;
         for (r, d) in results.iter().zip(distance.iter()) {
             println!("{} {}", r, d);
         }
