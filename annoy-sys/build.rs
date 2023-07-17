@@ -11,6 +11,7 @@ fn main() {
         .warnings(false)
         .compile("libannoy.a");
 
+    println!("cargo:rerun-if-changed=wrapper.hpp");
     let bindings = Builder::default()
         .clang_arg("-xc++")
         .header("wrapper.hpp")

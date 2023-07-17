@@ -57,7 +57,7 @@ extern "C"
         return ptr->get_distance(i, j);
     }
 
-    void annoy_angular_get_nns_by_item(void *idx, uint32_t item, size_t n, int search_k, uint32_t *result, float *distances)
+    size_t annoy_angular_get_nns_by_item(void *idx, uint32_t item, size_t n, int search_k, uint32_t *result, float *distances)
     {
         auto ptr = (AngularIndex *)idx;
         std::vector<uint32_t> resultVector;
@@ -68,9 +68,10 @@ extern "C"
             result[i] = resultVector[i];
             distances[i] = distancesVector[i];
         }
+        return resultVector.size();
     }
 
-    void annoy_angular_get_nns_by_vector(void *idx, float *w, size_t n, int search_k, uint32_t *result, float *distances)
+    size_t annoy_angular_get_nns_by_vector(void *idx, float *w, size_t n, int search_k, uint32_t *result, float *distances)
     {
         auto ptr = (AngularIndex *)idx;
         std::vector<uint32_t> resultVector;
@@ -81,6 +82,7 @@ extern "C"
             result[i] = resultVector[i];
             distances[i] = distancesVector[i];
         }
+        return resultVector.size();
     }
 
     uint32_t annoy_angular_get_n_items(void *idx)

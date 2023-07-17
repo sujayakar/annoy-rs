@@ -15,8 +15,8 @@ extern "C"
     void annoy_angular_unload(void *idx);
     bool annoy_angular_load(void *idx, char *filename, bool prefault, char **error);
     float annoy_angular_get_distance(void *idx, uint32_t i, uint32_t j);
-    void annoy_angular_get_nns_by_item(void *idx, uint32_t item, size_t n, int search_k, uint32_t *result, float *distances);
-    void annoy_angular_get_nns_by_vector(void *idx, float *w, size_t n, int search_k, uint32_t *result, float *distances);
+    size_t annoy_angular_get_nns_by_item(void *idx, uint32_t item, size_t n, int search_k, uint32_t *result, float *distances);
+    size_t annoy_angular_get_nns_by_vector(void *idx, float *w, size_t n, int search_k, uint32_t *result, float *distances);
     uint32_t annoy_angular_get_n_items(void *idx);
     void annoy_angular_verbose(void *idx, bool v);
     void annoy_angular_get_item(void *idx, uint32_t item, float *v);
