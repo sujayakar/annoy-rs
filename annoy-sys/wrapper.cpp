@@ -5,7 +5,7 @@
 
 using namespace Annoy;
 
-typedef ::AnnoyIndex<uint32_t, float, ::Angular, ::Kiss64Random, AnnoyIndexSingleThreadedBuildPolicy> AngularIndex;
+typedef ::AnnoyIndex<int32_t, float, ::Angular, ::Kiss64Random, AnnoyIndexSingleThreadedBuildPolicy> AngularIndex;
 
 extern "C"
 {
@@ -54,18 +54,18 @@ extern "C"
     float annoy_angular_get_distance(void *idx, uint32_t i, uint32_t j)
     {
         auto ptr = (AngularIndex *)idx;
-        return ptr->get_distance(i, j);
+        return ptr->get_distance((int32_t)i, (int32_t)j);
     }
 
     size_t annoy_angular_get_nns_by_item(void *idx, uint32_t item, size_t n, int search_k, uint32_t *result, float *distances)
     {
         auto ptr = (AngularIndex *)idx;
-        std::vector<uint32_t> resultVector;
+        std::vector<int32_t> resultVector;
         std::vector<float> distancesVector;
-        ptr->get_nns_by_item(item, n, search_k, &resultVector, &distancesVector);
+        ptr->get_nns_by_item((int32_t)item, n, search_k, &resultVector, &distancesVector);
         for (auto i = 0; i < resultVector.size(); i++)
         {
-            result[i] = resultVector[i];
+            result[i] = (uint32_t)resultVector[i];
             distances[i] = distancesVector[i];
         }
         return resultVector.size();
@@ -74,12 +74,12 @@ extern "C"
     size_t annoy_angular_get_nns_by_vector(void *idx, float *w, size_t n, int search_k, uint32_t *result, float *distances)
     {
         auto ptr = (AngularIndex *)idx;
-        std::vector<uint32_t> resultVector;
+        std::vector<int32_t> resultVector;
         std::vector<float> distancesVector;
         ptr->get_nns_by_vector(w, n, search_k, &resultVector, &distancesVector);
         for (auto i = 0; i < resultVector.size(); i++)
         {
-            result[i] = resultVector[i];
+            result[i] = (uint32_t)resultVector[i];
             distances[i] = distancesVector[i];
         }
         return resultVector.size();
@@ -100,7 +100,7 @@ extern "C"
     void annoy_angular_get_item(void *idx, uint32_t item, float *v)
     {
         auto ptr = (AngularIndex *)idx;
-        ptr->get_item(item, v);
+        ptr->get_item((int32_t)item, v);
     }
 
     void annoy_angular_set_seed(void *idx, uint64_t q)

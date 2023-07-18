@@ -3,7 +3,7 @@
 
 using namespace Annoy;
 
-typedef ::AnnoyIndex<uint32_t, float, ::Angular, ::Kiss64Random, AnnoyIndexSingleThreadedBuildPolicy> AngularIndex;
+typedef ::AnnoyIndex<int32_t, float, ::Angular, ::Kiss64Random, AnnoyIndexSingleThreadedBuildPolicy> AngularIndex;
 
 extern "C"
 {
