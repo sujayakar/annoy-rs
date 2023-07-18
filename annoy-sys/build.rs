@@ -2,12 +2,18 @@ use std::{env, path::PathBuf};
 
 use bindgen::{Builder, CargoCallbacks};
 
+#[cfg(target_os = "macos")]
+const CPP_STDLIB: &str = "c++";
+
+#[cfg(target_os = "linux")]
+const CPP_STDLIB: &str = "stdc++";
+
 fn main() {
     cc::Build::new()
         .cpp(true)
         .file("wrapper.cpp")
         .flag("-std=c++14")
-        .cpp_link_stdlib("c++")
+        .cpp_link_stdlib(CPP_STDLIB)
         .warnings(false)
         .compile("libannoy.a");
 
