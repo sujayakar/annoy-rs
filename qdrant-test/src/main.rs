@@ -97,12 +97,6 @@ fn create_disk_index(
     num_users: usize,
 ) -> anyhow::Result<PathBuf> {
     let mut rng = rand::thread_rng();
-    let start = Instant::now();
-    let data: Vec<_> = (0..10_000)
-        .map(|_| (random_uuid(&mut rng), random_normalized_vector(&mut rng)))
-        .collect();
-    println!("Generated {} vectors in {:?}", data.len(), start.elapsed());
-
     fs::create_dir_all(&out_dir)?;
 
     let scratch_dir = out_dir.join("_scratch");
@@ -128,7 +122,7 @@ fn create_disk_index(
     }
     println!(
         "Inserted {} random vectors into memory index in {:?}",
-        data.len(),
+        num_vectors,
         start.elapsed()
     );
 
