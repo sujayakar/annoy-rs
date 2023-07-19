@@ -1,0 +1,16 @@
+[package]
+name = "qdrant-test"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.72"
+atomic_refcell = "0.1.10"
+parking_lot = "0.12"
+qdrant_segment = { git = "https://github.com/qdrant/qdrant", package = "segment" }
+rand = "0.8.5"
+serde_json = "1"
+tempdir = "0.3.7"
+uuid = "1.4.1"
