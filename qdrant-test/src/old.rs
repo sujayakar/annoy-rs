@@ -1,3 +1,7 @@
+fn sp<T>(t: T) -> Arc<AtomicRefCell<T>> {
+    Arc::new(AtomicRefCell::new(t))
+}
+
 fn fill_segment1_dim4(segment: &mut Segment) -> anyhow::Result<()> {
     let vec1 = vec![1.0, 0.0, 1.0, 1.0];
     let vec2 = vec![1.0, 0.0, 1.0, 0.0];

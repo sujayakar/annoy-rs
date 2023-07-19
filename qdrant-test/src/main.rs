@@ -2,55 +2,25 @@ use std::{
     collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, Arc},
+    sync::atomic::AtomicBool,
     time::Instant,
 };
 
-use atomic_refcell::AtomicRefCell;
-use parking_lot::Mutex;
 use qdrant_segment::{
-    common::{
-        rocksdb_wrapper::{open_db, DB_VECTOR_CF},
-        version::StorageVersion,
-    },
     data_types::named_vectors::NamedVectors,
     entry::entry_point::SegmentEntry,
-    id_tracker::{simple_id_tracker::SimpleIdTracker, IdTracker},
-    index::{
-        hnsw_index::{
-            graph_links::{GraphLinksMmap, GraphLinksRam},
-            hnsw::HNSWIndex,
-        },
-        plain_payload_index::PlainIndex,
-        struct_payload_index::StructPayloadIndex,
-        VectorIndexEnum,
-    },
-    payload_storage::{
-        on_disk_payload_storage::OnDiskPayloadStorage, simple_payload_storage::SimplePayloadStorage,
-    },
-    segment::{Segment, SegmentVersion, VectorData},
-    segment_constructor::{
-        build_segment, get_vector_index_path, get_vector_storage_path, load_segment,
-        segment_builder::SegmentBuilder, PAYLOAD_INDEX_PATH,
-    },
+    segment_constructor::{build_segment, load_segment, segment_builder::SegmentBuilder},
     types::{
-        Distance, Filter, HnswConfig, Indexes, PayloadStorageType, PointIdType, SearchParams,
-        SegmentConfig, SegmentType, VectorDataConfig, VectorStorageType, WithPayload, WithVector,
-        DEFAULT_FULL_SCAN_THRESHOLD, DEFAULT_HNSW_EF_CONSTRUCT,
-    },
-    vector_storage::{
-        appendable_mmap_vector_storage::open_appendable_memmap_vector_storage,
-        memmap_vector_storage::open_memmap_vector_storage,
-        simple_vector_storage::open_simple_vector_storage, VectorStorage,
+        Condition, Distance, FieldCondition, Filter, HnswConfig, Indexes, Match, MatchValue,
+        PayloadStorageType, PointIdType, SearchParams, SegmentConfig, ValueVariants,
+        VectorDataConfig, VectorStorageType, WithPayload, WithVector, DEFAULT_FULL_SCAN_THRESHOLD,
+        DEFAULT_HNSW_EF_CONSTRUCT,
     },
 };
 use rand::Rng;
+use serde_json::json;
 use tempdir::TempDir;
 use uuid::Uuid;
-
-fn sp<T>(t: T) -> Arc<AtomicRefCell<T>> {
-    Arc::new(AtomicRefCell::new(t))
-}
 
 const VECTOR_NAME: &str = "vector_name";
 const DIMENSION: usize = 1536;
@@ -105,14 +75,6 @@ fn segment_config(append: bool) -> SegmentConfig {
     }
 }
 
-fn get_vector_name_with_prefix(prefix: &str, vector_name: &str) -> String {
-    if !vector_name.is_empty() {
-        format!("{prefix}-{vector_name}")
-    } else {
-        prefix.to_owned()
-    }
-}
-
 fn random_uuid(rng: &mut impl Rng) -> Uuid {
     Uuid::from_bytes(rng.gen())
 }
@@ -129,7 +91,11 @@ fn random_normalized_vector(rng: &mut impl Rng) -> Vec<f32> {
     v
 }
 
-fn create_disk_index(out_dir: &Path) -> anyhow::Result<PathBuf> {
+fn create_disk_index(
+    out_dir: &Path,
+    num_vectors: usize,
+    num_users: usize,
+) -> anyhow::Result<PathBuf> {
     let mut rng = rand::thread_rng();
     let start = Instant::now();
     let data: Vec<_> = (0..10_000)
@@ -150,15 +116,18 @@ fn create_disk_index(out_dir: &Path) -> anyhow::Result<PathBuf> {
     // fill_segment1(&mut memory_segment)?;
 
     let start = Instant::now();
-    for (uuid, v) in &data {
-        memory_segment.upsert_point(
-            1,
-            PointIdType::Uuid(*uuid),
-            NamedVectors::from_ref(VECTOR_NAME, v),
-        )?;
+    for _ in 0..num_vectors {
+        let seq_num = 1;
+        let point_id = PointIdType::Uuid(random_uuid(&mut rng));
+        let vector = random_normalized_vector(&mut rng);
+        let named_vectors = NamedVectors::from_ref(VECTOR_NAME, &vector);
+        memory_segment.upsert_point(seq_num, point_id, named_vectors)?;
+
+        let payload = json!({"userId": rng.gen_range(0..num_users)}).into();
+        memory_segment.set_payload(seq_num, point_id, &payload)?;
     }
     println!(
-        "Inserted {} vectors into memory index in {:?}",
+        "Inserted {} random vectors into memory index in {:?}",
         data.len(),
         start.elapsed()
     );
@@ -184,27 +153,33 @@ fn create_disk_index(out_dir: &Path) -> anyhow::Result<PathBuf> {
     Ok(disk_segment_path)
 }
 
-fn query(path: &Path, num_results: usize) -> anyhow::Result<()> {
+fn query(path: &Path, num_results: usize, user_id: Option<usize>) -> anyhow::Result<()> {
     let start = Instant::now();
     let Some(segment) = load_segment(path)? else {
         anyhow::bail!("Failed to load segment: Segment not properly saved");
     };
-    println!(
-        "Loaded segment in {:?} with config: {:#?}",
-        start.elapsed(),
-        segment.segment_config
-    );
+    println!("Loaded segment in {:?}", start.elapsed());
     let query_vector = random_normalized_vector(&mut rand::thread_rng());
     let with_payload = WithPayload {
         enable: false,
         payload_selector: None,
     };
     let with_vector = WithVector::Bool(false);
-    let filter = Filter {
+    let mut filter = Filter {
         should: None,
         must: None,
         must_not: None,
     };
+    if let Some(user_id) = user_id {
+        let condition = Condition::Field(FieldCondition::new_match(
+            "userId",
+            Match::Value(MatchValue {
+                value: ValueVariants::Integer(user_id as i64),
+            }),
+        ));
+        filter.should = Some(vec![condition]);
+        // TODO: Find a way to get at the query planner when we add a filter.
+    }
     let search_params = SearchParams {
         hnsw_ef: None,
         exact: false,
@@ -261,24 +236,35 @@ fn merge(left_path: &Path, right_path: &Path, out_path: &Path) -> anyhow::Result
 fn main() -> anyhow::Result<()> {
     let command = env::args()
         .nth(1)
-        .ok_or_else(|| anyhow::anyhow!("Usage: ./qdrant-test (create <path> | query <path>)"))?;
+        .ok_or_else(|| anyhow::anyhow!("Usage: ./qdrant-test (create|query|merge)"))?;
     match &command[..] {
         "create" => {
-            let path = env::args()
-                .nth(2)
-                .ok_or_else(|| anyhow::anyhow!("Usage: ./qdrant-test create <path>"))?;
-            create_disk_index(&Path::new(&path))?;
+            let path = env::args().nth(2).ok_or_else(|| {
+                anyhow::anyhow!("Usage: ./qdrant-test create <path> <numVectors> <numUsers>")
+            })?;
+            let num_vectors = env::args()
+                .nth(3)
+                .map(|n| n.parse::<usize>())
+                .transpose()?
+                .unwrap_or(1000);
+            let num_users = env::args()
+                .nth(4)
+                .map(|n| n.parse::<usize>())
+                .transpose()?
+                .unwrap_or(100);
+            create_disk_index(&Path::new(&path), num_vectors, num_users)?;
         }
         "query" => {
-            let path = env::args()
-                .nth(2)
-                .ok_or_else(|| anyhow::anyhow!("Usage: ./qdrant-test query <path> <numResults>"))?;
-            let num_results: usize = env::args()
+            let path = env::args().nth(2).ok_or_else(|| {
+                anyhow::anyhow!("Usage: ./qdrant-test query <path> <numResults> <userId>")
+            })?;
+            let num_results = env::args()
                 .nth(3)
                 .map(|n| n.parse::<usize>())
                 .transpose()?
                 .unwrap_or(5);
-            query(&Path::new(&path), num_results)?;
+            let user_id = env::args().nth(4).map(|n| n.parse::<usize>()).transpose()?;
+            query(&Path::new(&path), num_results, user_id)?;
         }
         // See collection/collection_manager/optimizers for more details on merge policies.
         "merge" => {
