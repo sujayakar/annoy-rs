@@ -15,7 +15,7 @@ use qdrant_segment::{
         PayloadStorageType, PointIdType, SearchParams, SegmentConfig, ValueVariants,
         VectorDataConfig, VectorStorageType, WithPayload, WithVector, DEFAULT_FULL_SCAN_THRESHOLD,
         DEFAULT_HNSW_EF_CONSTRUCT,
-    },
+    }, segment::Segment,
 };
 use rand::Rng;
 use serde_json::json;
@@ -27,7 +27,7 @@ const DIMENSION: usize = 1536;
 
 fn segment_config(append: bool) -> SegmentConfig {
     let index = if append {
-        Indexes::Plain {}
+        Indexes::Plain{}
     } else {
         let hnsw_config = HnswConfig {
             /// Number of edges per node in the index graph. Larger the value -
@@ -50,18 +50,11 @@ fn segment_config(append: bool) -> SegmentConfig {
             /// will be used.
             payload_m: None,
         };
-        Indexes::Hnsw(hnsw_config)
+     Indexes::Hnsw(hnsw_config)
     };
-    let vector_storage_type = if append {
-        VectorStorageType::Memory
-    } else {
-        VectorStorageType::Mmap
-    };
-    let payload_storage_type = if append {
-        PayloadStorageType::InMemory
-    } else {
-        PayloadStorageType::OnDisk
-    };
+    let vector_storage_type = VectorStorageType::ChunkedMmap;
+    let payload_storage_type = PayloadStorageType::OnDisk;
+
     let vector_data_config = VectorDataConfig {
         size: DIMENSION,
         distance: Distance::Cosine,
@@ -102,12 +95,9 @@ fn create_disk_index(
     let scratch_dir = out_dir.join("_scratch");
     fs::create_dir_all(&scratch_dir)?;
 
-    let memory_config = segment_config(true);
-    let memory_segment_path = out_dir.join("memory");
-    let mut memory_segment = build_segment(&memory_segment_path, &memory_config, true)?;
-    // memory_segment.save_current_state()?;
-    // SegmentVersion::save(&memory_segment_path)?;
-    // fill_segment1(&mut memory_segment)?;
+    let mutable_config = segment_config(true);
+    let mutable_segment_path = out_dir.join("mutable");
+    let mut mutable_segment = build_segment(&mutable_segment_path, &mutable_config, true)?;
 
     let start = Instant::now();
     for _ in 0..num_vectors {
@@ -115,44 +105,57 @@ fn create_disk_index(
         let point_id = PointIdType::Uuid(random_uuid(&mut rng));
         let vector = random_normalized_vector(&mut rng);
         let named_vectors = NamedVectors::from_ref(VECTOR_NAME, &vector);
-        memory_segment.upsert_point(seq_num, point_id, named_vectors)?;
+        mutable_segment.upsert_point(seq_num, point_id, named_vectors)?;
 
         let payload = json!({"userId": rng.gen_range(0..num_users)}).into();
-        memory_segment.set_payload(seq_num, point_id, &payload)?;
+        mutable_segment.set_payload(seq_num, point_id, &payload)?;
     }
     println!(
-        "Inserted {} random vectors into memory index in {:?}",
+        "Inserted {} random vectors into mutable index in {:?}",
         num_vectors,
         start.elapsed()
     );
 
     let start = Instant::now();
 
-    // Pack the memory segment into a disk segment.
+    // Pack the mutable segment into a disk segment.
     let stopped = AtomicBool::new(false);
     let disk_segment_path = out_dir.join("disk");
     fs::create_dir_all(&disk_segment_path)?;
     let disk_config = segment_config(false);
     let mut builder = SegmentBuilder::new(&disk_segment_path, &scratch_dir, &disk_config)?;
-    builder.update_from(&memory_segment, &stopped)?;
+    builder.update_from(&mutable_segment, &stopped)?;
     let disk_segment = builder.build(&stopped)?;
-    disk_segment.save_current_state()?;
+    let result = disk_segment.take_snapshot(&scratch_dir, &disk_segment_path)?;
 
     println!(
         "Built disk index ({} points) in {:?}",
-        disk_segment.iter_points().count(),
+        mutable_segment.iter_points().count(),
         start.elapsed()
     );
 
-    Ok(disk_segment_path)
+    Ok(result)
 }
 
-fn query(path: &Path, num_results: usize, user_id: Option<usize>) -> anyhow::Result<()> {
+fn restore_segment_from_tar(archive_path: &Path) -> anyhow::Result<PathBuf> {
+    // This is taken directly from Qdrant's tests...
+    let segment_id = archive_path.file_stem().and_then(|f| f.to_str()).unwrap();
+    Segment::restore_snapshot(archive_path, segment_id)?;
+    // As is this...
+    Ok(archive_path.parent().expect("Failed to obtain parent for archive").join(segment_id))
+}
+
+fn query(archive_path: &Path, num_results: usize, user_id: Option<usize>) -> anyhow::Result<()> {
+    let start_restore = Instant::now();
+    let segment_path = restore_segment_from_tar(archive_path)?;
+    println!("Restored in {:?}", start_restore.elapsed());
+
     let start = Instant::now();
-    let Some(segment) = load_segment(path)? else {
+    let Some(segment) = load_segment(&segment_path)? else {
         anyhow::bail!("Failed to load segment: Segment not properly saved");
     };
-    println!("Loaded segment in {:?}", start.elapsed());
+
+    println!("Loaded segment from restore in {:?}", start.elapsed());
     let query_vector = random_normalized_vector(&mut rand::thread_rng());
     let with_payload = WithPayload {
         enable: false,
@@ -180,6 +183,7 @@ fn query(path: &Path, num_results: usize, user_id: Option<usize>) -> anyhow::Res
         quantization: None,
     };
     let start = Instant::now();
+    let stopped = AtomicBool::default();
     let results = segment.search(
         VECTOR_NAME,
         &query_vector,
@@ -188,6 +192,7 @@ fn query(path: &Path, num_results: usize, user_id: Option<usize>) -> anyhow::Res
         Some(&filter),
         num_results,
         Some(&search_params),
+        &stopped,
     )?;
     println!(
         "Queried {} of {num_results} results in {:?}:",
@@ -246,7 +251,8 @@ fn main() -> anyhow::Result<()> {
                 .map(|n| n.parse::<usize>())
                 .transpose()?
                 .unwrap_or(100);
-            create_disk_index(&Path::new(&path), num_vectors, num_users)?;
+            let created = create_disk_index(&Path::new(&path), num_vectors, num_users)?;
+            println!("Wrote disk index to {created:?}");
         }
         "query" => {
             let path = env::args().nth(2).ok_or_else(|| {
