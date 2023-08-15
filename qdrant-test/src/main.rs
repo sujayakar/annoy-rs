@@ -9,13 +9,14 @@ use std::{
 use qdrant_segment::{
     data_types::named_vectors::NamedVectors,
     entry::entry_point::SegmentEntry,
+    segment::Segment,
     segment_constructor::{build_segment, load_segment, segment_builder::SegmentBuilder},
     types::{
         Condition, Distance, FieldCondition, Filter, HnswConfig, Indexes, Match, MatchValue,
         PayloadStorageType, PointIdType, SearchParams, SegmentConfig, ValueVariants,
         VectorDataConfig, VectorStorageType, WithPayload, WithVector, DEFAULT_FULL_SCAN_THRESHOLD,
         DEFAULT_HNSW_EF_CONSTRUCT,
-    }, segment::Segment,
+    },
 };
 use rand::Rng;
 use serde_json::json;
@@ -27,7 +28,7 @@ const DIMENSION: usize = 1536;
 
 fn segment_config(append: bool) -> SegmentConfig {
     let index = if append {
-        Indexes::Plain{}
+        Indexes::Plain {}
     } else {
         let hnsw_config = HnswConfig {
             /// Number of edges per node in the index graph. Larger the value -
@@ -50,7 +51,7 @@ fn segment_config(append: bool) -> SegmentConfig {
             /// will be used.
             payload_m: None,
         };
-     Indexes::Hnsw(hnsw_config)
+        Indexes::Hnsw(hnsw_config)
     };
     let vector_storage_type = VectorStorageType::ChunkedMmap;
     let payload_storage_type = PayloadStorageType::OnDisk;
@@ -142,7 +143,10 @@ fn restore_segment_from_tar(archive_path: &Path) -> anyhow::Result<PathBuf> {
     let segment_id = archive_path.file_stem().and_then(|f| f.to_str()).unwrap();
     Segment::restore_snapshot(archive_path, segment_id)?;
     // As is this...
-    Ok(archive_path.parent().expect("Failed to obtain parent for archive").join(segment_id))
+    Ok(archive_path
+        .parent()
+        .expect("Failed to obtain parent for archive")
+        .join(segment_id))
 }
 
 fn query(archive_path: &Path, num_results: usize, user_id: Option<usize>) -> anyhow::Result<()> {
